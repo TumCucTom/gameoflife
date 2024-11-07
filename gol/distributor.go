@@ -349,16 +349,16 @@ func calculateNewAlive(p Params, start, end int, n chan neighbourPixel) {
 						xCoord := x + i
 						if xCoord < 0 {
 							xCoord = p.ImageWidth - 1
-						} else {
-							xCoord = xCoord % p.ImageWidth
+						} else if xCoord >= p.ImageWidth {
+							xCoord = 0
 						}
 
 						// for image wrap around
 						yCoord := y + j
 						if yCoord < 0 {
 							yCoord = p.ImageHeight - 1
-						} else {
-							yCoord = yCoord % p.ImageHeight
+						} else if yCoord >= p.ImageHeight {
+							yCoord = 0
 						}
 
 						// if you are not offset, do not add one as this is yourself
