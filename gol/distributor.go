@@ -7,11 +7,14 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-var wg, pause, executingKeyPress sync.WaitGroup
+var wg, pause, executingKeyPress, calcN, combineN, calcA sync.WaitGroup
 
 // var mu sync.Mutex
 var turn IntContainer
-var worldGlobal, oldWorld WorldContainer
+
+var worldGlobal [][]uint8
+
+//var worldGlobal, neighboursGlobal WorldContainer
 
 type BoolContainer struct {
 	mu      sync.Mutex
@@ -33,6 +36,13 @@ func (c *WorldContainer) setup(worldS [][]uint8) {
 	defer c.mu.Unlock()
 
 	c.world = worldS
+}
+
+func (c *WorldContainer) inc(x, y int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.world[x][y]++
 }
 
 func (c *WorldContainer) read(x, y int) uint8 {
@@ -119,19 +129,25 @@ type pixel struct {
 	Value uint8
 }
 
-type neighbourPixel struct {
-	X int
-	Y int
+type suint8 struct {
+	x   int
+	val []uint8
 }
 
-func getAliveCells(p Params) []util.Cell {
+type neighbourPixel struct {
+	X    int
+	Y    int
+	quit bool
+}
+
+func getAliveCells(p Params, world [][]uint8) []util.Cell {
 	// make the slice
 	aliveCells := make([]util.Cell, 0)
 
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			// append every CellAlive cells
-			if worldGlobal.read(x, y) == CellAlive {
+			if world[x][y] == CellAlive {
 				aliveCells = append(aliveCells, util.Cell{X: x, Y: y})
 			}
 		}
@@ -140,12 +156,12 @@ func getAliveCells(p Params) []util.Cell {
 	return aliveCells
 }
 
-func getNumAliveCells(p Params) int {
+func getNumAliveCells(p Params, world [][]uint8) int {
 	num := 0
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
 			// append every CellAlive cells
-			if worldGlobal.read(x, y) == CellAlive {
+			if world[x][y] == CellAlive {
 				num++
 			}
 		}
@@ -154,7 +170,7 @@ func getNumAliveCells(p Params) int {
 	return num
 }
 
-func makeOutput(p Params, c distributorChannels) {
+func makeOutput(p Params, c distributorChannels, world [][]uint8) {
 
 	// add a get output to the command channel
 	c.ioCommand <- ioOutput
@@ -163,7 +179,7 @@ func makeOutput(p Params, c distributorChannels) {
 	// add one pixel at a time to the output channel
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
-			c.ioOutput <- worldGlobal.read(x, y)
+			c.ioOutput <- world[x][y]
 		}
 	}
 
@@ -172,7 +188,7 @@ func makeOutput(p Params, c distributorChannels) {
 	<-c.ioIdle
 }
 
-func makeOutputTurnWithTurnNum(p Params, c distributorChannels, turns int) {
+func makeOutputTurnWithTurnNum(p Params, c distributorChannels, turns int, world [][]uint8) {
 
 	// add a get output to the command channel
 	c.ioCommand <- ioOutput
@@ -182,7 +198,7 @@ func makeOutputTurnWithTurnNum(p Params, c distributorChannels, turns int) {
 	// add one pixel at a time to the output channel
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
-			c.ioOutput <- worldGlobal.read(x, y)
+			c.ioOutput <- world[x][y]
 		}
 	}
 
@@ -212,185 +228,442 @@ func makeOutputOld(world [][]uint8, p Params, c distributorChannels, turns int) 
 	c.events <- ImageOutputComplete{turns, filename}
 }
 
-func combineChannelData(data chan pixel, c distributorChannels) {
-	length := len(data)
+//func combineChannelDataNum(data chan pixel, c distributorChannels, workerNum int) {
+//	for {
+//		select {
+//		case <-data:
+//			item := <-data
+//			if item.Value == 1 {
+//				count.inc()
+//
+//			} else {
+//				x := item.X
+//				y := item.Y
+//				if item.Value != worldGlobal.read(x, y) {
+//					worldGlobal.write(x, y, item.Value)
+//					c.events <- CellFlipped{turn.get(), util.Cell{X: x, Y: y}}
+//				}
+//			}
+//		default:
+//			if count.get() >= workerNum*2 {
+//				return
+//			}
+//		}
+//	}
+//}
 
-	for i := 0; i < length; i++ {
+//func combineChannelData(data chan pixel) {
+//	length := len(data)
+//	for i := 0; i < length; i++ {
+//		item := <-data
+//		worldGlobal.write(item.X, item.Y, item.Value)
+//	}
+//}
 
-		item := <-data
-		x := item.X
-		y := item.Y
+//func combineChannelDataN(data chan neighbourPixel) {
+//	length := len(data)
+//	for i := 0; i < length; i++ {
+//		item := <-data
+//		neighboursGlobal.inc(item.X, item.Y)
+//	}
+//}
 
-		if item.Value != worldGlobal.read(x, y) {
-			worldGlobal.write(x, y, item.Value)
-			c.events <- CellFlipped{turn.get(), util.Cell{X: x, Y: y}}
+//func combineChannelDataNNum(data chan neighbourPixel, numWorkers int) {
+//	for {
+//		select {
+//		case <-data:
+//			item := <-data
+//			if item.quit {
+//				count.inc()
+//				fmt.Print(count.get(), " ")
+//			} else {
+//				neighboursGlobal.inc(item.X, item.Y)
+//			}
+//		default:
+//			if count.get() >= numWorkers {
+//				wg.Done()
+//				return
+//			}
+//		}
+//	}
+//}
+
+//func startWaits(workers int) {
+//	calcN.Add(workers)
+//	calcA.Add(workers)
+//	combineN.Add(1)
+//}
+
+//func startWorkers(workerNum, numRows int, p Params, c chan pixel, n chan neighbourPixel, chans distributorChannels) {
+//	startWaits(workerNum)
+//	i := 0
+//	for i < workerNum-1 {
+//		go updateWorldWorker(i*numRows, numRows*(i+1), workerNum, c, p, n, chans)
+//		i++
+//	}
+//
+//	// final worker does the remaining rows
+//	go updateWorldWorker(i*numRows, p.ImageHeight, workerNum, c, p, n, chans)
+//
+//}
+
+//func startWorkersNeighbours(workerNum, numRows int, p Params, neighbourChan chan neighbourPixel) {
+//	// if there is only one worker
+//	if workerNum == 1 {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go calculateNewAlive(p, 0, numRows, neighbourChan)
+//		return
+//	}
+//
+//	// if there is more than one worker
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go calculateNewAlive(p, 0, numRows, neighbourChan)
+//
+//	// spread work between workers up to the last whole multiple
+//	finishRow := numRows
+//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go calculateNewAlive(p, i, i+numRows, neighbourChan)
+//		finishRow += numRows
+//	}
+//	// final worker does the remaining rows
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go calculateNewAlive(p, finishRow, p.ImageHeight, neighbourChan)
+//}
+
+//func startWorkersCombineN(neighbours WorldContainer, workerNum, numRows int, p Params, neighbourChan chan neighbourPixel) {
+//
+//	// if there is only one worker
+//	if workerNum == 1 {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go combineChannelDataNNum(neighbours, neighbourChan)
+//		return
+//	}
+//
+//	// if there is more than one worker
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go combineChannelDataNNum(neighbours, neighbourChan)
+//
+//	// spread work between workers up to the last whole multiple
+//	finishRow := numRows
+//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go combineChannelDataNNum(neighbours, neighbourChan)
+//		finishRow += numRows
+//	}
+//
+//	// final worker does the remaining rows
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go combineChannelDataNNum(neighbours, neighbourChan)
+//}
+
+//func startWorkersCombine(workerNum, numRows int, p Params, data chan pixel, c distributorChannels) {
+//
+//	// if there is only one worker
+//	if workerNum == 1 {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go combineChannelData(data, c, 16-workerNum)
+//		return
+//	}
+//
+//	// if there is more than one worker
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go combineChannelData(data, c, 16-workerNum)
+//
+//	// spread work between workers up to the last whole multiple
+//	finishRow := numRows
+//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
+//		// add one to wait for this worker
+//		wg.Add(1)
+//		go combineChannelData(data, c, 16-workerNum)
+//		finishRow += numRows
+//	}
+//
+//	// final worker does the remaining rows
+//	// add one to wait for this worker
+//	wg.Add(1)
+//	go combineChannelData(data, c, 16-workerNum)
+//}
+
+func calculateNewAliveParallel(p Params, workerNum int, c distributorChannels, world [][]uint8) [][]uint8 {
+	//numRows := p.ImageHeight / workerNum
+
+	// make channels for the world data and neighbour data
+	// needs to be the size of the board
+	//dataChan := make(chan pixel, p.ImageWidth*p.ImageHeight)
+	//// needs to be the size of the board 8 times as we may send 8 neighbours for each pixel
+	//neighbourChan := make(chan neighbourPixel, 8*p.ImageWidth*p.ImageHeight)
+	//// close these channels after calculation
+	//defer close(dataChan)
+	//defer close(neighbourChan)
+	//
+	//neighbours := make([][]uint8, p.ImageHeight)
+	//for i := range neighbours {
+	//	neighbours[i] = make([]uint8, p.ImageWidth)
+	//}
+	//
+	//neighboursGlobal.setup(neighbours)
+
+	//// start workers for calculating neighbours
+	//startWorkersNeighbours(14, numRows, p, neighbourChan)
+	//var neighbours WorldContainer
+	//neighbour := make([][]uint8, p.ImageHeight)
+	//for i := range neighbour {
+	//	neighbour[i] = make([]uint8, p.ImageWidth)
+	//}
+	//neighbours.setup(neighbour)
+	////startWorkersCombineN(neighbours, amount, numRows, p, neighbourChan)
+	//wg.Add(2)
+	//go combineChannelDataNNum(neighbours, neighbourChan)
+	//go combineChannelDataNNum(neighbours, neighbourChan)
+	//
+	//// wait for neighbours to be calculated
+	//wg.Wait()
+	//neighbour = neighbours.giveWhole()
+
+	//var newWorld [][]uint8
+
+	splitSegments := make([]chan pixel, workerNum)
+	for i := range splitSegments {
+		splitSegments[i] = make(chan pixel, p.ImageWidth*p.ImageWidth)
+	}
+	// start workers to make the world
+	//startWorkers(workerNum, numRows, p, dataChan, neighbourChan, c)
+	setupWorkers(p.ImageHeight, workerNum, splitSegments, world)
+
+	cells := make([]util.Cell, p.ImageWidth*p.ImageHeight)
+
+	wg.Wait()
+	for i := 0; i < workerNum; i++ {
+		length := len(splitSegments[i])
+		for j := 0; j < length; j++ {
+			item := <-splitSegments[i]
+			world[item.X][item.Y] = item.Value
+			cells = append(cells, util.Cell{X: item.X, Y: item.Y})
+		}
+	}
+	c.events <- CellsFlipped{turn.get() + 1, cells}
+	//for i := 0; i < workerNum; i++ {
+	//	//temp := <-splitSegments[i]
+	//	//for _, item := range temp {
+	//	//	fmt.Println(item)
+	//	//}
+	//	newWorld = append(newWorld, <-splitSegments[i]...)
+	//}
+
+	return world
+}
+func setupWorkers(size, workerNum int, splitSegments []chan pixel, world [][]uint8) {
+	numRows := size / workerNum
+
+	i := 0
+	for i < workerNum-1 {
+		wg.Add(1)
+		go runWorker(size, i*numRows, (i+1)*numRows, splitSegments[i], world)
+		i++
+	}
+
+	// final worker does the remaining rows
+	wg.Add(1)
+	go runWorker(size, i*numRows, size, splitSegments[i], world)
+}
+func runWorker(size, start, end int, splitSegment chan pixel, world [][]uint8) {
+	defer wg.Done()
+	calculateNextWorld(start, end, size, world, splitSegment)
+}
+
+func calculateNextWorld(start, end, width int, world [][]uint8, c chan pixel) {
+	//newWorld := make([][]uint8, end-start)
+	//for i := 0; i < end-start; i++ {
+	//	newWorld[i] = world[i]
+	//}
+
+	neighboursWorld := calculateNeighbours(start, end, width, world)
+	//for _, item := range neighboursWorld {
+	//	fmt.Println(item)
+	//}
+
+	for y := start; y < end; y++ {
+		for x := 0; x < width; x++ {
+			neighbors := neighboursWorld[y][x]
+			if (neighbors < 2 || neighbors > 3) && world[y][x] == 255 {
+				c <- pixel{y, x, 0}
+			} else if neighbors == 3 && world[y][x] == 0 {
+				c <- pixel{y, x, 255}
+			}
 		}
 	}
 }
 
-func combineChannelDataN(data chan neighbourPixel, p Params) [][]int {
-	// Create a 2D slice to store the neighbour count
-	neighbours := make([][]int, p.ImageHeight)
+func calculateNeighbours(start, end, width int, world [][]uint8) [][]int {
+	neighbours := make([][]int, width)
 	for i := range neighbours {
-		neighbours[i] = make([]int, p.ImageWidth)
+		neighbours[i] = make([]int, width)
 	}
 
-	length := len(data)
-	for i := 0; i < length; i++ {
+	if !(start == 0 && end == width) {
+		if start == 0 {
+			for x := 0; x < width; x++ {
+				if world[width-1][x] == CellAlive {
+					for i := -1; i <= 1; i++ {
+						//for image wrap around
+						xCoord := x + i
+						if xCoord < 0 {
+							xCoord = width - 1
+						} else if xCoord >= width {
+							xCoord = 0
+						}
+						neighbours[0][xCoord]++
+					}
+				}
+			}
+		} else {
+			start--
+		}
 
-		item := <-data
-		neighbours[item.X][item.Y] += 1
-	}
-	return neighbours
-}
-
-func startWorkers(workerNum, numRows int, p Params, c chan pixel, neighbours [][]int) {
-	// if there is only one worker
-	if workerNum == 1 {
-		wg.Add(1)
-		go updateWorldWorker(0, numRows, neighbours, c, p)
-		return
-	}
-
-	// if there is more than one worker
-	//first worker
-	wg.Add(1)
-	go updateWorldWorker(0, numRows, neighbours, c, p)
-
-	// spread work between workers up to the last whole multiple
-	num := 1
-	finishRow := numRows
-	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
-		wg.Add(1)
-		go updateWorldWorker(i, i+numRows, neighbours, c, p)
-		num++
-		finishRow += numRows
-	}
-	// final worker does the remaining rows
-	wg.Add(1)
-	go updateWorldWorker(finishRow, p.ImageHeight, neighbours, c, p)
-
-}
-
-func startWorkersNeighbours(workerNum, numRows int, p Params, neighbourChan chan neighbourPixel) {
-	// if there is only one worker
-	if workerNum == 1 {
-		// add one to wait for this worker
-		wg.Add(1)
-		go calculateNewAlive(p, 0, numRows, neighbourChan)
-		return
+		if end == width {
+			for x := 0; x < width; x++ {
+				if world[0][x] == CellAlive {
+					for i := -1; i <= 1; i++ {
+						//for image wrap around
+						xCoord := x + i
+						if xCoord < 0 {
+							xCoord = width - 1
+						} else if xCoord >= width {
+							xCoord = 0
+						}
+						neighbours[width-1][xCoord]++
+					}
+				}
+			}
+		} else {
+			end++
+		}
 	}
 
-	// if there is more than one worker
-	// add one to wait for this worker
-	wg.Add(1)
-	go calculateNewAlive(p, 0, numRows, neighbourChan)
-
-	// spread work between workers up to the last whole multiple
-	finishRow := numRows
-	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
-		// add one to wait for this worker
-		wg.Add(1)
-		go calculateNewAlive(p, i, i+numRows, neighbourChan)
-		finishRow += numRows
-	}
-
-	// final worker does the remaining rows
-	// add one to wait for this worker
-	wg.Add(1)
-	go calculateNewAlive(p, finishRow, p.ImageHeight, neighbourChan)
-}
-
-func calculateNewAliveParallel(p Params, workerNum int, c distributorChannels) {
-	// this says RoundUp(p.imageHeight / workNum)
-	numRows := (p.ImageHeight + workerNum - 1) / workerNum
-
-	// make channels for the world data and neighbour data
-	// needs to be the size of the board
-	dataChan := make(chan pixel, p.ImageWidth*p.ImageHeight)
-	// needs to be the size of the board 8 times as we may send 8 neighbours for each pixel
-	neighbourChan := make(chan neighbourPixel, 8*p.ImageWidth*p.ImageHeight)
-	// close these channels after calculation
-	defer close(dataChan)
-	defer close(neighbourChan)
-
-	// start workers for calculating neighbours
-	startWorkersNeighbours(workerNum, numRows, p, neighbourChan)
-
-	// wait for neighbours to be calculated, then recombine neighbours
-	wg.Wait()
-	neighbours := combineChannelDataN(neighbourChan, p)
-
-	// start workers to make the world
-	startWorkers(workerNum, numRows, p, dataChan, neighbours)
-
-	//wait for neighbours to be calculated, then recombine world
-	wg.Wait()
-	combineChannelData(dataChan, c)
-}
-
-func calculateNewAlive(p Params, start, end int, n chan neighbourPixel) {
-	// state that this worker is done once the functions completes
-	defer wg.Done()
-
-	//get neighbours
-	// for all cells, calculate how many neighbours it has
 	for y := start; y < end; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-
+		for x := 0; x < width; x++ {
 			// if a cell is CellAlive
-			if worldGlobal.read(x, y) == CellAlive {
+			if world[y][x] == CellAlive {
 				// add 1 to all neighbours
 				// i and j are the offset
 				for i := -1; i <= 1; i++ {
 					for j := -1; j <= 1; j++ {
 
-						//for image wrap around
-						xCoord := x + i
-						if xCoord < 0 {
-							xCoord = p.ImageWidth - 1
-						} else if xCoord >= p.ImageWidth {
-							xCoord = 0
-						}
-
-						// for image wrap around
-						yCoord := y + j
-						if yCoord < 0 {
-							yCoord = p.ImageHeight - 1
-						} else if yCoord >= p.ImageHeight {
-							yCoord = 0
-						}
-
-						// if you are not offset, do not add one as this is yourself
+						// if you are not offset, do not add one. This is yourself
 						if !(i == 0 && j == 0) {
-							n <- neighbourPixel{xCoord, yCoord}
+							ny, nx := y+i, x+j
+							if nx < 0 {
+								nx = width - 1
+							} else if nx == width {
+								nx = 0
+							} else {
+								nx = nx % width
+							}
+
+							if ny < 0 {
+								ny = width - 1
+							} else if ny == width {
+								ny = 0
+							} else {
+								ny = ny % width
+							}
+
+							neighbours[ny][nx]++
 						}
+
 					}
 				}
 			}
 		}
 	}
+
+	return neighbours
 }
 
-func updateWorldWorker(start, end int, neighbours [][]int, c chan pixel, p Params) {
-	// state that you are done once the function finishes
-	defer wg.Done()
+//func calculateNewAlive(p Params, start, end int, n chan neighbourPixel) {
+//	// state that this worker is done once the functions completes
+//
+//	//get neighbours
+//	// for all cells, calculate how many neighbours it has
+//	for y := start; y < end; y++ {
+//		for x := 0; x < p.ImageWidth; x++ {
+//
+//			// if a cell is CellAlive
+//			if worldGlobal.read(x, y) == CellAlive {
+//				// add 1 to all neighbours
+//				// i and j are the offset
+//				for i := -1; i <= 1; i++ {
+//					for j := -1; j <= 1; j++ {
+//
+//						//for image wrap around
+//						xCoord := x + i
+//						if xCoord < 0 {
+//							xCoord = p.ImageWidth - 1
+//						} else if xCoord >= p.ImageWidth {
+//							xCoord = 0
+//						}
+//
+//						// for image wrap around
+//						yCoord := y + j
+//						if yCoord < 0 {
+//							yCoord = p.ImageHeight - 1
+//						} else if yCoord >= p.ImageWidth {
+//							yCoord = 0
+//						}
+//
+//						// if you are not offset, do not add one. This is yourself
+//						if !(i == 0 && j == 0) {
+//							n <- neighbourPixel{xCoord, yCoord, false}
+//						}
+//					}
+//				}
+//			}
+//		}
+//	}
+//	//n <- neighbourPixel{-1, -1, true}
+//}
 
-	// for all cells in your region
-	for y := start; y < end; y++ {
-		for x := 0; x < p.ImageWidth; x++ {
-
-			numNeighbours := neighbours[x][y]
-			// you die with less than two or more than 3 neighbours (or stay dead)
-			if numNeighbours < 2 || numNeighbours > 3 {
-				c <- pixel{x, y, CellDead}
-			} else if numNeighbours == 3 {
-				// you become alive if you are dead and have exactly 3
-				c <- pixel{x, y, CellAlive}
-			}
-		}
-	}
-}
+//func updateWorldWorker(start, end, workerNum int, c chan pixel, p Params, n chan neighbourPixel, chans distributorChannels) {
+//	calculateNewAlive(p, start, end, n)
+//	calcN.Done()
+//	calcN.Wait()
+//
+//	//combineChannelDataNNum(n, workerNum)
+//	//combineN.Done()
+//	combineN.Wait()
+//	//for _, item := range neighbours {
+//	//	fmt.Println(item)
+//	//}
+//
+//	// for all cells in your region
+//	for y := start; y < end; y++ {
+//		for x := 0; x < p.ImageWidth; x++ {
+//
+//			numNeighbours := neighboursGlobal.read(x, y)
+//			// you die with less than two or more than 3 neighbours (or stay dead)
+//			if numNeighbours < 2 || numNeighbours > 3 {
+//				c <- pixel{x, y, CellDead}
+//			} else if numNeighbours == 3 {
+//				// you become alive if you are dead and have exactly 3
+//				c <- pixel{x, y, CellAlive}
+//			}
+//			// stay the same
+//		}
+//	}
+//	//c <- pixel{-1, -1, 1}
+//	calcA.Done()
+//}
 
 func runAliveEvery2(done chan bool) {
 	//make the ticker
@@ -407,12 +680,12 @@ func runAliveEvery2(done chan bool) {
 	}
 }
 
-func paused(c distributorChannels, p Params) {
+func paused(c distributorChannels, p Params, world [][]uint8) {
 	c.events <- StateChange{turn.get(), Paused}
 	for keyNew := range c.keyPresses {
 		switch keyNew {
 		case 's':
-			makeOutputOld(worldGlobal.giveWhole(), p, c, turn.get())
+			makeOutputOld(world, p, c, turn.get())
 		case 'p':
 			c.events <- StateChange{turn.get(), Executing}
 			pause.Done()
@@ -436,40 +709,38 @@ func runKeyPressController(c distributorChannels, p Params) {
 		case 'p':
 			executingKeyPress.Add(1)
 			pause.Add(1)
-			paused(c, p)
+			paused(c, p, worldGlobal)
 			executingKeyPress.Done()
 		}
 	}
 }
 
-func executeTurns(p Params, c distributorChannels) {
+func executeTurns(p Params, c distributorChannels, world [][]uint8) [][]uint8 {
 	for turn.get() < p.Turns {
-
 		// call the function to calculate new CellAlive cells from old CellAlive cells
-		calculateNewAliveParallel(p, p.Threads, c)
-
-		oldWorld.setup(worldGlobal.giveWhole())
+		world = calculateNewAliveParallel(p, p.Threads, c, world)
+		worldGlobal = world
 
 		// increase the number of turns passed
 		turn.inc()
-
 		//runKeyPressController(c, p)
 
 		pause.Wait()
 		if end.get() {
-			return
+			return world
 		}
 		if getCount.get() {
 			getCount.setFalse()
-			c.events <- AliveCellsCount{turn.get(), getNumAliveCells(p)}
+			c.events <- AliveCellsCount{turn.get(), getNumAliveCells(p, world)}
 		}
 		if snapshot.get() {
 			snapshot.setFalse()
-			makeOutputTurnWithTurnNum(p, c, turn.get())
+			makeOutputTurnWithTurnNum(p, c, turn.get(), world)
 		}
 
 		c.events <- TurnComplete{turn.get()}
 	}
+	return world
 }
 
 // distributor divides the work between workers and interacts with other goroutines.
@@ -499,8 +770,11 @@ func distributor(p Params, c distributorChannels) {
 		}
 	}
 
-	oldWorld.setup(world)
-	worldGlobal.setup(world)
+	worldGlobal = world
+	//worldGlobal.setup(world)
+	//for _, n := range worldGlobal.giveWhole() {
+	//	fmt.Println(n)
+	//}
 	c.events <- CellsFlipped{turn.get(), cells}
 	c.events <- StateChange{turn.get(), Executing}
 
@@ -518,17 +792,17 @@ func distributor(p Params, c distributorChannels) {
 	<-c.ioIdle
 
 	// Execute all turns of the Game of Life.
-	executeTurns(p, c)
+	world = executeTurns(p, c, world)
 
 	//output the slice to a pgm
 	if end.get() {
-		makeOutputTurnWithTurnNum(p, c, turn.get())
+		makeOutputTurnWithTurnNum(p, c, turn.get(), world)
 	} else {
-		makeOutput(p, c)
+		makeOutput(p, c, world)
 	}
 
 	//Report the final state using FinalTurnCompleteEvent.
-	aliveCells := getAliveCells(p)
+	aliveCells := getAliveCells(p, world)
 	c.events <- FinalTurnComplete{turn.get(), aliveCells}
 
 	// Make sure that the Io has finished any output before exiting.
