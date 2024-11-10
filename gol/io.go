@@ -12,8 +12,8 @@ type ioChannels struct {
 	idle    chan<- bool
 
 	filename <-chan string
-	output   <-chan uint8
-	input    chan<- uint8
+	output   <-chan [][]uint8
+	input    chan<- [][]uint8
 }
 
 // ioState is the internal ioState of the io goroutine.
@@ -57,20 +57,7 @@ func (io *ioState) writePgmImage() {
 	_, _ = file.WriteString(strconv.Itoa(255))
 	_, _ = file.WriteString("\n")
 
-	world := make([][]byte, io.params.ImageHeight)
-	for i := range world {
-		world[i] = make([]byte, io.params.ImageWidth)
-	}
-
-	for y := 0; y < io.params.ImageHeight; y++ {
-		for x := 0; x < io.params.ImageWidth; x++ {
-			val := <-io.channels.output
-			//if val != 0 {
-			//	fmt.Println(x, y)
-			//}
-			world[y][x] = val
-		}
-	}
+	world := <-io.channels.output
 
 	for y := 0; y < io.params.ImageHeight; y++ {
 		for x := 0; x < io.params.ImageWidth; x++ {
@@ -117,9 +104,18 @@ func (io *ioState) readPgmImage() {
 
 	image := []byte(fields[4])
 
-	for _, b := range image {
-		io.channels.input <- b
+	world := make([][]uint8, io.params.ImageHeight)
+	for i := range world {
+		world[i] = make([]uint8, io.params.ImageWidth)
 	}
+
+	count := 0
+	for _, b := range image {
+		world[count%io.params.ImageWidth][count/io.params.ImageHeight] = b
+		count++
+	}
+
+	io.channels.input <- world
 
 	//fmt.Println("File", filename, "input done!")
 }
