@@ -61,7 +61,7 @@ func (io *ioState) writePgmImage() {
 
 	for y := 0; y < io.params.ImageHeight; y++ {
 		for x := 0; x < io.params.ImageWidth; x++ {
-			_, ioError = file.Write([]byte{world[y][x]})
+			_, ioError = file.Write([]byte{world[x][y]})
 			util.Check(ioError)
 		}
 	}

@@ -7,12 +7,12 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-var wg, pause, executingKeyPress sync.WaitGroup
+var wg, pause, executingKeyPress, pauseReached sync.WaitGroup
 
 // var mu sync.Mutex
 var turn IntContainer
 
-var worldGlobal [][]uint8
+var worldGlobal, worldOld [][]uint8
 
 type BoolContainer struct {
 	mu      sync.Mutex
@@ -337,12 +337,12 @@ func runAliveEvery2(done chan bool) {
 	}
 }
 
-func paused(c distributorChannels, p Params, world [][]uint8) {
+func paused(c distributorChannels, p Params, world [][]uint8, turns int) {
 	c.events <- StateChange{turn.get(), Paused}
 	for keyNew := range c.keyPresses {
 		switch keyNew {
 		case 's':
-			makeOutputTurnWithTurnNum(p, c, turn.get(), world)
+			makeOutputTurnWithTurnNum(p, c, turns, world)
 		case 'p':
 			c.events <- StateChange{turn.get(), Executing}
 			pause.Done()
@@ -366,13 +366,15 @@ func runKeyPressController(c distributorChannels, p Params) {
 		case 'p':
 			executingKeyPress.Add(1)
 			pause.Add(1)
-			paused(c, p, worldGlobal)
+			pauseReached.Wait()
+			paused(c, p, worldGlobal, turn.get())
 			executingKeyPress.Done()
 		}
 	}
 }
 
 func executeTurns(p Params, c distributorChannels, world [][]uint8) [][]uint8 {
+	pauseReached.Add(1)
 	for turn.get() < p.Turns {
 		// call the function to calculate new CellAlive cells from old CellAlive cells
 		world = calculateNewAliveParallel(p, p.Threads, c, world)
@@ -382,7 +384,10 @@ func executeTurns(p Params, c distributorChannels, world [][]uint8) [][]uint8 {
 		turn.inc()
 		//runKeyPressController(c, p)
 
+		pauseReached.Done()
 		pause.Wait()
+		pauseReached.Add(1)
+
 		if end.get() {
 			return world
 		}
@@ -396,6 +401,8 @@ func executeTurns(p Params, c distributorChannels, world [][]uint8) [][]uint8 {
 		}
 
 		c.events <- TurnComplete{turn.get()}
+		worldOld = world
+
 	}
 	return world
 }
@@ -418,6 +425,7 @@ func distributor(p Params, c distributorChannels) {
 	cells := make([]util.Cell, p.ImageWidth*p.ImageHeight)
 
 	world = <-c.ioInput
+	worldOld = world
 
 	for y := 0; y < p.ImageHeight; y++ {
 		for x := 0; x < p.ImageWidth; x++ {
