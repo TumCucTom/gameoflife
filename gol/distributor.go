@@ -172,7 +172,7 @@ func calculateNewAliveParallel(p Params, workerNum int, c distributorChannels, w
 	//startWorkers(workerNum, numRows, p, dataChan, neighbourChan, c)
 	setupWorkers(p.ImageHeight, workerNum, splitSegments, world)
 
-	cells := make([]util.Cell, p.ImageWidth*p.ImageHeight)
+	var cells []util.Cell
 
 	wg.Wait()
 	for i := 0; i < workerNum; i++ {
