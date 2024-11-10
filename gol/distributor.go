@@ -7,14 +7,12 @@ import (
 	"uk.ac.bris.cs/gameoflife/util"
 )
 
-var wg, pause, executingKeyPress, calcN, combineN, calcA sync.WaitGroup
+var wg, pause, executingKeyPress sync.WaitGroup
 
 // var mu sync.Mutex
 var turn IntContainer
 
 var worldGlobal [][]uint8
-
-//var worldGlobal, neighboursGlobal WorldContainer
 
 type BoolContainer struct {
 	mu      sync.Mutex
@@ -29,41 +27,6 @@ type IntContainer struct {
 type WorldContainer struct {
 	mu    sync.Mutex
 	world [][]uint8
-}
-
-func (c *WorldContainer) setup(worldS [][]uint8) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.world = worldS
-}
-
-func (c *WorldContainer) inc(x, y int) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.world[x][y]++
-}
-
-func (c *WorldContainer) read(x, y int) uint8 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.world[x][y]
-}
-
-func (c *WorldContainer) giveWhole() [][]uint8 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	return c.world
-}
-
-func (c *WorldContainer) write(x, y int, val uint8) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.world[x][y] = val
 }
 
 func (c *IntContainer) inc() {
@@ -198,225 +161,8 @@ func makeOutputTurnWithTurnNum(p Params, c distributorChannels, turns int, world
 	c.events <- ImageOutputComplete{turns, filename}
 }
 
-func makeOutputOld(world [][]uint8, p Params, c distributorChannels, turns int) {
-
-	// add a get output to the command channel
-	c.ioCommand <- ioOutput
-	filename := fmt.Sprintf("%vx%vx%v", p.ImageWidth, p.ImageHeight, turns)
-	c.ioFilename <- filename
-
-	c.ioOutput <- world
-
-	// Make sure that the Io has finished any output before exiting.
-	c.ioCommand <- ioCheckIdle
-	<-c.ioIdle
-	c.events <- ImageOutputComplete{turns, filename}
-}
-
-//func combineChannelDataNum(data chan pixel, c distributorChannels, workerNum int) {
-//	for {
-//		select {
-//		case <-data:
-//			item := <-data
-//			if item.Value == 1 {
-//				count.inc()
-//
-//			} else {
-//				x := item.X
-//				y := item.Y
-//				if item.Value != worldGlobal.read(x, y) {
-//					worldGlobal.write(x, y, item.Value)
-//					c.events <- CellFlipped{turn.get(), util.Cell{X: x, Y: y}}
-//				}
-//			}
-//		default:
-//			if count.get() >= workerNum*2 {
-//				return
-//			}
-//		}
-//	}
-//}
-
-//func combineChannelData(data chan pixel) {
-//	length := len(data)
-//	for i := 0; i < length; i++ {
-//		item := <-data
-//		worldGlobal.write(item.X, item.Y, item.Value)
-//	}
-//}
-
-//func combineChannelDataN(data chan neighbourPixel) {
-//	length := len(data)
-//	for i := 0; i < length; i++ {
-//		item := <-data
-//		neighboursGlobal.inc(item.X, item.Y)
-//	}
-//}
-
-//func combineChannelDataNNum(data chan neighbourPixel, numWorkers int) {
-//	for {
-//		select {
-//		case <-data:
-//			item := <-data
-//			if item.quit {
-//				count.inc()
-//				fmt.Print(count.get(), " ")
-//			} else {
-//				neighboursGlobal.inc(item.X, item.Y)
-//			}
-//		default:
-//			if count.get() >= numWorkers {
-//				wg.Done()
-//				return
-//			}
-//		}
-//	}
-//}
-
-//func startWaits(workers int) {
-//	calcN.Add(workers)
-//	calcA.Add(workers)
-//	combineN.Add(1)
-//}
-
-//func startWorkers(workerNum, numRows int, p Params, c chan pixel, n chan neighbourPixel, chans distributorChannels) {
-//	startWaits(workerNum)
-//	i := 0
-//	for i < workerNum-1 {
-//		go updateWorldWorker(i*numRows, numRows*(i+1), workerNum, c, p, n, chans)
-//		i++
-//	}
-//
-//	// final worker does the remaining rows
-//	go updateWorldWorker(i*numRows, p.ImageHeight, workerNum, c, p, n, chans)
-//
-//}
-
-//func startWorkersNeighbours(workerNum, numRows int, p Params, neighbourChan chan neighbourPixel) {
-//	// if there is only one worker
-//	if workerNum == 1 {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go calculateNewAlive(p, 0, numRows, neighbourChan)
-//		return
-//	}
-//
-//	// if there is more than one worker
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go calculateNewAlive(p, 0, numRows, neighbourChan)
-//
-//	// spread work between workers up to the last whole multiple
-//	finishRow := numRows
-//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go calculateNewAlive(p, i, i+numRows, neighbourChan)
-//		finishRow += numRows
-//	}
-//	// final worker does the remaining rows
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go calculateNewAlive(p, finishRow, p.ImageHeight, neighbourChan)
-//}
-
-//func startWorkersCombineN(neighbours WorldContainer, workerNum, numRows int, p Params, neighbourChan chan neighbourPixel) {
-//
-//	// if there is only one worker
-//	if workerNum == 1 {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go combineChannelDataNNum(neighbours, neighbourChan)
-//		return
-//	}
-//
-//	// if there is more than one worker
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go combineChannelDataNNum(neighbours, neighbourChan)
-//
-//	// spread work between workers up to the last whole multiple
-//	finishRow := numRows
-//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go combineChannelDataNNum(neighbours, neighbourChan)
-//		finishRow += numRows
-//	}
-//
-//	// final worker does the remaining rows
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go combineChannelDataNNum(neighbours, neighbourChan)
-//}
-
-//func startWorkersCombine(workerNum, numRows int, p Params, data chan pixel, c distributorChannels) {
-//
-//	// if there is only one worker
-//	if workerNum == 1 {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go combineChannelData(data, c, 16-workerNum)
-//		return
-//	}
-//
-//	// if there is more than one worker
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go combineChannelData(data, c, 16-workerNum)
-//
-//	// spread work between workers up to the last whole multiple
-//	finishRow := numRows
-//	for i := numRows; i < p.ImageHeight-numRows; i += numRows {
-//		// add one to wait for this worker
-//		wg.Add(1)
-//		go combineChannelData(data, c, 16-workerNum)
-//		finishRow += numRows
-//	}
-//
-//	// final worker does the remaining rows
-//	// add one to wait for this worker
-//	wg.Add(1)
-//	go combineChannelData(data, c, 16-workerNum)
-//}
-
 func calculateNewAliveParallel(p Params, workerNum int, c distributorChannels, world [][]uint8) [][]uint8 {
 	//numRows := p.ImageHeight / workerNum
-
-	// make channels for the world data and neighbour data
-	// needs to be the size of the board
-	//dataChan := make(chan pixel, p.ImageWidth*p.ImageHeight)
-	//// needs to be the size of the board 8 times as we may send 8 neighbours for each pixel
-	//neighbourChan := make(chan neighbourPixel, 8*p.ImageWidth*p.ImageHeight)
-	//// close these channels after calculation
-	//defer close(dataChan)
-	//defer close(neighbourChan)
-	//
-	//neighbours := make([][]uint8, p.ImageHeight)
-	//for i := range neighbours {
-	//	neighbours[i] = make([]uint8, p.ImageWidth)
-	//}
-	//
-	//neighboursGlobal.setup(neighbours)
-
-	//// start workers for calculating neighbours
-	//startWorkersNeighbours(14, numRows, p, neighbourChan)
-	//var neighbours WorldContainer
-	//neighbour := make([][]uint8, p.ImageHeight)
-	//for i := range neighbour {
-	//	neighbour[i] = make([]uint8, p.ImageWidth)
-	//}
-	//neighbours.setup(neighbour)
-	////startWorkersCombineN(neighbours, amount, numRows, p, neighbourChan)
-	//wg.Add(2)
-	//go combineChannelDataNNum(neighbours, neighbourChan)
-	//go combineChannelDataNNum(neighbours, neighbourChan)
-	//
-	//// wait for neighbours to be calculated
-	//wg.Wait()
-	//neighbour = neighbours.giveWhole()
-
-	//var newWorld [][]uint8
 
 	splitSegments := make([]chan pixel, workerNum)
 	for i := range splitSegments {
@@ -576,80 +322,6 @@ func calculateNeighbours(start, end, width int, world [][]uint8) [][]int {
 	return neighbours
 }
 
-//func calculateNewAlive(p Params, start, end int, n chan neighbourPixel) {
-//	// state that this worker is done once the functions completes
-//
-//	//get neighbours
-//	// for all cells, calculate how many neighbours it has
-//	for y := start; y < end; y++ {
-//		for x := 0; x < p.ImageWidth; x++ {
-//
-//			// if a cell is CellAlive
-//			if worldGlobal.read(x, y) == CellAlive {
-//				// add 1 to all neighbours
-//				// i and j are the offset
-//				for i := -1; i <= 1; i++ {
-//					for j := -1; j <= 1; j++ {
-//
-//						//for image wrap around
-//						xCoord := x + i
-//						if xCoord < 0 {
-//							xCoord = p.ImageWidth - 1
-//						} else if xCoord >= p.ImageWidth {
-//							xCoord = 0
-//						}
-//
-//						// for image wrap around
-//						yCoord := y + j
-//						if yCoord < 0 {
-//							yCoord = p.ImageHeight - 1
-//						} else if yCoord >= p.ImageWidth {
-//							yCoord = 0
-//						}
-//
-//						// if you are not offset, do not add one. This is yourself
-//						if !(i == 0 && j == 0) {
-//							n <- neighbourPixel{xCoord, yCoord, false}
-//						}
-//					}
-//				}
-//			}
-//		}
-//	}
-//	//n <- neighbourPixel{-1, -1, true}
-//}
-
-//func updateWorldWorker(start, end, workerNum int, c chan pixel, p Params, n chan neighbourPixel, chans distributorChannels) {
-//	calculateNewAlive(p, start, end, n)
-//	calcN.Done()
-//	calcN.Wait()
-//
-//	//combineChannelDataNNum(n, workerNum)
-//	//combineN.Done()
-//	combineN.Wait()
-//	//for _, item := range neighbours {
-//	//	fmt.Println(item)
-//	//}
-//
-//	// for all cells in your region
-//	for y := start; y < end; y++ {
-//		for x := 0; x < p.ImageWidth; x++ {
-//
-//			numNeighbours := neighboursGlobal.read(x, y)
-//			// you die with less than two or more than 3 neighbours (or stay dead)
-//			if numNeighbours < 2 || numNeighbours > 3 {
-//				c <- pixel{x, y, CellDead}
-//			} else if numNeighbours == 3 {
-//				// you become alive if you are dead and have exactly 3
-//				c <- pixel{x, y, CellAlive}
-//			}
-//			// stay the same
-//		}
-//	}
-//	//c <- pixel{-1, -1, 1}
-//	calcA.Done()
-//}
-
 func runAliveEvery2(done chan bool) {
 	//make the ticker
 	ticker := time.NewTicker(2 * time.Second)
@@ -670,7 +342,7 @@ func paused(c distributorChannels, p Params, world [][]uint8) {
 	for keyNew := range c.keyPresses {
 		switch keyNew {
 		case 's':
-			makeOutputOld(world, p, c, turn.get())
+			makeOutputTurnWithTurnNum(p, c, turn.get(), world)
 		case 'p':
 			c.events <- StateChange{turn.get(), Executing}
 			pause.Done()
